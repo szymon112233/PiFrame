@@ -5,9 +5,12 @@
 import os
 import io
 import pickle
+import random
+
 import piexif
 import piexif.helper
 import requests
+import yaml
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
@@ -20,6 +23,11 @@ SCOPES = [
 ]
 
 service = None
+
+defaultConfig = config = {
+    "albumName": "default",
+    "bgColor": "black"
+}
 
 def auto_filename(path, instance=0):
     """
@@ -46,44 +54,41 @@ def print_hi(name):
 def download_media_item(entry):
     try:
         url, path, description = entry
-        if not os.path.isfile(path):
-            r = requests.get(url)
-            if r.status_code == 200:
-                path = auto_filename(path)
-                if description:
-                    try:
-                        img = Image.open(io.BytesIO(r.content))
-                        exif_dict = piexif.load(img.info["exif"])
-                        exif_dict["Exif"][
-                            piexif.ExifIFD.UserComment
-                        ] = piexif.helper.UserComment.dump(
-                            description, encoding="unicode"
+        r = requests.get(url)
+        if r.status_code == 200:
+            # path = auto_filename(path)
+            if description:
+                try:
+                    img = Image.open(io.BytesIO(r.content))
+                    exif_dict = piexif.load(img.info["exif"])
+                    exif_dict["Exif"][
+                        piexif.ExifIFD.UserComment
+                    ] = piexif.helper.UserComment.dump(
+                        description, encoding="unicode"
+                    )
+
+                    # This is a known bug with piexif (https://github.com/hMatoba/Piexif/issues/95)
+                    if 41729 in exif_dict["Exif"]:
+                        exif_dict["Exif"][41729] = bytes(
+                            exif_dict["Exif"][41729]
                         )
 
-                        # This is a known bug with piexif (https://github.com/hMatoba/Piexif/issues/95)
-                        if 41729 in exif_dict["Exif"]:
-                            exif_dict["Exif"][41729] = bytes(
-                                exif_dict["Exif"][41729]
-                            )
-
-                        exif_bytes = piexif.dump(exif_dict)
-                        img.save(path, exif=exif_bytes)
-                    except ValueError:
-                        # This value here is to catch a specific scenario with file extensions that have
-                        # descriptions that are unsupported by Pillow so the program can't modify the EXIF data.
-                        print(
-                            " [INFO] media file unsupported, can't write description to EXIF data."
-                        )
-                        open(path, "wb").write(r.content)
-                else:
+                    exif_bytes = piexif.dump(exif_dict)
+                    img.save(path, exif=exif_bytes)
+                except ValueError:
+                    # This value here is to catch a specific scenario with file extensions that have
+                    # descriptions that are unsupported by Pillow so the program can't modify the EXIF data.
+                    print(
+                        " [INFO] media file unsupported, can't write description to EXIF data."
+                    )
                     open(path, "wb").write(r.content)
+            else:
+                open(path, "wb").write(r.content)
 
-                return (
-                    path
-                )
+            return (
+                path
+            )
 
-        else:
-            return False
     except Exception as e:
         print(" [ERROR] media item could not be downloaded because:", e)
         return False
@@ -146,6 +151,62 @@ def get_token():
     print(credentials)
     return build("photoslibrary", "v1", credentials=credentials, static_discovery=False)
 
+def load_config():
+    config = None
+    if not (os.path.exists("config.yaml")):
+        with io.open('config.yaml', 'w', encoding='utf8') as outfile:
+            yaml.dump(defaultConfig, outfile, default_flow_style=False, allow_unicode=True)
+
+    with open("config.yaml", 'r') as stream:
+        config = yaml.safe_load(stream)
+
+    return config
+
+def getRandomImageFromAlbum(albumName):
+    print("xD")
+    albums = list_albums()
+    found = False
+    foundAlbumID = ""
+
+    for album in albums:
+        if "title" not in album:
+            album["title"] = "Unnamed Album"
+        if album["title"] == albumName:
+            found = True
+            foundAlbumID = album["id"]
+            break
+
+    if not found:
+        print("Did not found album {0}".format(str(albumName)))
+        return
+
+    # Make request
+    album_items = []
+
+    request_body = {
+        "albumId": foundAlbumID,
+        "pageSize": 100,  # Max is 100
+        "pageToken": "",
+    }
+    num = 0
+    request = (
+        service.mediaItems().search(body=request_body).execute()
+    )  # 100 is max
+    if not request:
+        return
+    while True:
+        if "mediaItems" in request:
+            album_items += request["mediaItems"]
+        if "nextPageToken" in request:
+            request_body["pageToken"] = request["nextPageToken"]
+            request = service.mediaItems().search(body=request_body).execute()
+        else:
+            break
+
+    randomPhotoIndex = random.randrange(0, len(album_items))
+
+    download_media_item((album_items[randomPhotoIndex]["baseUrl"] + "=d", "./image.jpg", None))
+
 
 def updateImage(imagePath):
     # resize the image to fill the whole screen
@@ -168,32 +229,33 @@ def updateImage(imagePath):
     # label.photo = image
 
 
-if __name__ == '__main__':
-    print_hi('PyCharm')
-    service = get_token()
-    # albums = list_albums()
-    # print(albums.__str__())
-
-    # download_media_item(("", "", None))
-
-    fav = get_favourites()
-    print(fav.__str__())
-    download_media_item((fav[0]["baseUrl"] + "=d", "./image.jpg", None))
-
+def show_image():
+    global root, canvas, imgbox
     root = Tk()
     root.attributes('-fullscreen', 1)
     root.bind('<Escape>', lambda _: root.destroy())
-
-    canvas = Canvas(root, highlightthickness=0, bg="black")
+    canvas = Canvas(root, highlightthickness=0, bg=config["bgColor"])
     canvas.pack(fill=BOTH, expand=1)
-    imgbox = canvas.create_image(root.winfo_screenwidth()/2, 0, image=None, anchor='n')
+    imgbox = canvas.create_image(root.winfo_screenwidth() / 2, 0, image=None, anchor='n')
     # label = Label(root, compound=TOP)
     # label.pack()
-
     # show the first image
     updateImage('image.jpg')
     # change the image 5 seconds later
     # root.after(5000, updateRoot, 'Dog.jpg')
-
     root.mainloop()
+
+
+if __name__ == '__main__':
+    config = load_config()
+    service = get_token()
+    albums = list_albums()
+    print(albums.__str__())
+
+    # fav = get_favourites()
+    # print(fav.__str__())
+    # download_media_item((fav[0]["baseUrl"] + "=d", "./image.jpg", None))
+    getRandomImageFromAlbum(config["albumName"] + " ")
+
+    show_image()
 

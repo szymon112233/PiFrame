@@ -163,3 +163,4 @@ cython_debug/
 /creds.json
 /token
 /image.jpg
+/config.yaml
