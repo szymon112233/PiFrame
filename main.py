@@ -6,6 +6,7 @@ import os
 import io
 import pickle
 import random
+import time
 
 import piexif
 import piexif.helper
@@ -26,8 +27,12 @@ service = None
 
 defaultConfig = config = {
     "albumName": "default",
-    "bgColor": "black"
+    "bgColor": "black",
+    "photoDisplayTime": 5.0
 }
+
+cached_albums = None
+cached_media = None
 
 def auto_filename(path, instance=0):
     """
@@ -94,6 +99,12 @@ def download_media_item(entry):
         return False
 
 def list_albums():
+
+    global cached_albums
+
+    if cached_albums != None:
+        return cached_albums
+
     num = 0
     album_list = []
     request = service.albums().list(pageSize=50).execute()  # Max is 50
@@ -112,6 +123,7 @@ def list_albums():
         else:
             break
         num += 1
+    cached_albums = album_list
     return album_list
 
 def get_favourites():
@@ -163,7 +175,8 @@ def load_config():
     return config
 
 def getRandomImageFromAlbum(albumName):
-    print("xD")
+    global cached_media
+    print("getRandomImageFromAlbum")
     albums = list_albums()
     found = False
     foundAlbumID = ""
@@ -183,25 +196,34 @@ def getRandomImageFromAlbum(albumName):
     # Make request
     album_items = []
 
-    request_body = {
-        "albumId": foundAlbumID,
-        "pageSize": 100,  # Max is 100
-        "pageToken": "",
-    }
-    num = 0
-    request = (
-        service.mediaItems().search(body=request_body).execute()
-    )  # 100 is max
-    if not request:
-        return
-    while True:
-        if "mediaItems" in request:
-            album_items += request["mediaItems"]
-        if "nextPageToken" in request:
-            request_body["pageToken"] = request["nextPageToken"]
-            request = service.mediaItems().search(body=request_body).execute()
-        else:
-            break
+    if cached_media is not None and foundAlbumID in cached_media:
+        print("the album is cached! woooohoooooooooooooooo")
+        album_items = cached_media[foundAlbumID]
+    else:
+        print("the album is not cached! boooo")
+        request_body = {
+            "albumId": foundAlbumID,
+            "pageSize": 25,  # Max is 100
+            "pageToken": "",
+        }
+        num = 0
+        request = (
+            service.mediaItems().search(body=request_body).execute()
+        )  # 100 is max
+        if not request:
+            return
+        while True:
+            if "mediaItems" in request:
+                album_items += request["mediaItems"]
+            if "nextPageToken" in request:
+                request_body["pageToken"] = request["nextPageToken"]
+                request = service.mediaItems().search(body=request_body).execute()
+            else:
+                break
+        if cached_media is None:
+            cached_media = {}
+        cached_media[foundAlbumID] = album_items
+
 
     randomPhotoIndex = random.randrange(0, len(album_items))
 
@@ -209,6 +231,7 @@ def getRandomImageFromAlbum(albumName):
 
 
 def updateImage(imagePath):
+    print("updateImage")
     # resize the image to fill the whole screen
     pilImage = PILIMage.open(imagePath)
     w, h = root.winfo_screenwidth(), root.winfo_screenheight()
@@ -227,9 +250,12 @@ def updateImage(imagePath):
     # label['text'] = imagePath
     # label['image'] = image
     # label.photo = image
+    # root.update_idletasks()
+    # root.update()
 
 
 def show_image():
+    print("show_image")
     global root, canvas, imgbox
     root = Tk()
     root.attributes('-fullscreen', 1)
@@ -243,19 +269,34 @@ def show_image():
     updateImage('image.jpg')
     # change the image 5 seconds later
     # root.after(5000, updateRoot, 'Dog.jpg')
-    root.mainloop()
+
+
+
+def PhotoLoop():
+
+    while(True):
+        time.sleep(config["photoDisplayTime"])
+        DisplayNextPhoto()
+
+def DisplayNextPhoto():
+    print("DisplayNextPhoto")
+    getRandomImageFromAlbum(config["albumName"] + " ")
+    updateImage('image.jpg')
+    root.after(config["photoDisplayTime"], DisplayNextPhoto)
 
 
 if __name__ == '__main__':
     config = load_config()
     service = get_token()
     albums = list_albums()
-    print(albums.__str__())
+    # print(albums.__str__())
 
-    # fav = get_favourites()
-    # print(fav.__str__())
-    # download_media_item((fav[0]["baseUrl"] + "=d", "./image.jpg", None))
     getRandomImageFromAlbum(config["albumName"] + " ")
-
     show_image()
+
+    root.after(config["photoDisplayTime"], DisplayNextPhoto)
+    root.mainloop()
+
+    # PhotoLoop()
+
 
