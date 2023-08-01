@@ -24,15 +24,18 @@ SCOPES = [
 ]
 
 service = None
+root = None
 
 defaultConfig = config = {
-    "albumName": "default",
+    "mode": "all_media", #available modes: all_media, albums, search, favourites
+    "albumNames": [],
+    "searchString": "duck",
     "bgColor": "black",
-    "photoDisplayTime": 5.0
+    "photoDisplayTime": 5000
 }
 
 cached_albums = None
-cached_media = None
+cached_media = dict()
 
 def auto_filename(path, instance=0):
     """
@@ -126,20 +129,47 @@ def list_albums():
     cached_albums = album_list
     return album_list
 
-def get_favourites():
+def getRandomImageFromFavourites():
+    global cached_media
+    print("getRandomImageFromFavourites")
+
     request_body = {
-        "filters": {"featureFilter": {"includedFeatures": ["FAVORITES"]}},
+        "filters": {"featureFilter": {"includedFeatures": ["FAVORITES"]}, "mediaTypeFilter": {"mediaTypes": ["PHOTO"]}},
         "pageSize": 100,  # Max is 100
         "pageToken": "",
     }
     favorites_list = []
 
-    request = service.mediaItems().search(body=request_body).execute()
+    if cached_media is not None and "favourites" in cached_media:
+        favorites_list = cached_media["favourites"]
+    else:
+        request = service.mediaItems().search(body=request_body).execute()
 
-    if "mediaItems" in request:
-        favorites_list += request["mediaItems"]
+        if not request:
+            return
 
-    return favorites_list
+        if "mediaItems" in request:
+            favorites_list += request["mediaItems"]
+        cached_media["favourites"] = favorites_list
+
+        while True:
+            if "mediaItems" in request:
+                favorites_list += request["mediaItems"]
+            if "nextPageToken" in request:
+                next_page = request["nextPageToken"]
+                request_body["pageToken"] = next_page
+                request = (
+                    service.mediaItems()
+                    .search(body=request_body)
+                    .execute()
+                )
+            else:
+                break
+            cached_media["favourites"] = favorites_list
+
+    randomPhotoIndex = random.randrange(0, len(favorites_list))
+
+    download_media_item((favorites_list[randomPhotoIndex]["baseUrl"] + "=d", "./image.jpg", None))
 
 def get_token():
     credentials_file = "./creds.json"
@@ -174,9 +204,17 @@ def load_config():
 
     return config
 
-def getRandomImageFromAlbum(albumName):
+def getRandomImageFromAlbums(albumNames):
     global cached_media
     print("getRandomImageFromAlbum")
+
+    if (len(albumNames) == 0):
+        print("Did not provide any album names!")
+
+
+    randomAlbumIndex = random.randrange(0, len(albumNames))
+    albumName = albumNames[randomAlbumIndex]
+
     albums = list_albums()
     found = False
     foundAlbumID = ""
@@ -197,10 +235,10 @@ def getRandomImageFromAlbum(albumName):
     album_items = []
 
     if cached_media is not None and foundAlbumID in cached_media:
-        print("the album is cached! woooohoooooooooooooooo")
+        print("the album " + albumName +" is cached! woooohoooooooooooooooo")
         album_items = cached_media[foundAlbumID]
     else:
-        print("the album is not cached! boooo")
+        print("the album " + albumName +" is not cached! boooo")
         request_body = {
             "albumId": foundAlbumID,
             "pageSize": 25,  # Max is 100
@@ -220,8 +258,6 @@ def getRandomImageFromAlbum(albumName):
                 request = service.mediaItems().search(body=request_body).execute()
             else:
                 break
-        if cached_media is None:
-            cached_media = {}
         cached_media[foundAlbumID] = album_items
 
 
@@ -229,8 +265,39 @@ def getRandomImageFromAlbum(albumName):
 
     download_media_item((album_items[randomPhotoIndex]["baseUrl"] + "=d", "./image.jpg", None))
 
+def getRandomImageFromAllLibrary():
+    global cached_media
+    print("getRandomImageFromAllLibrary")
+
+    media_items_list = []
+
+    if cached_media is not None and "AllMedia" in cached_media:
+        media_items_list = cached_media["AllMedia"]
+    else:
+        request = service.mediaItems().list(pageSize=100).execute()  # Max is 50
+        if not request:
+            return {}
+        while True:
+            if "mediaItems" in request:
+                media_items_list += request["mediaItems"]
+            if "nextPageToken" in request:
+                next_page = request["nextPageToken"]
+                request = (
+                    service.mediaItems()
+                    .list(pageSize=100, pageToken=next_page)
+                    .execute()
+                )
+            else:
+                break
+        cached_media["AllMedia"] = media_items_list
+
+    randomPhotoIndex = random.randrange(0, len(media_items_list))
+
+    download_media_item((media_items_list[randomPhotoIndex]["baseUrl"] + "=d", "./image.jpg", None))
+
 
 def updateImage(imagePath):
+    global root
     print("updateImage")
     # resize the image to fill the whole screen
     pilImage = PILIMage.open(imagePath)
@@ -254,8 +321,8 @@ def updateImage(imagePath):
     # root.update()
 
 
-def show_image():
-    print("show_image")
+def setupTkCanvas():
+    print("setupTkCanvas")
     global root, canvas, imgbox
     root = Tk()
     root.attributes('-fullscreen', 1)
@@ -266,7 +333,6 @@ def show_image():
     # label = Label(root, compound=TOP)
     # label.pack()
     # show the first image
-    updateImage('image.jpg')
     # change the image 5 seconds later
     # root.after(5000, updateRoot, 'Dog.jpg')
 
@@ -280,7 +346,22 @@ def PhotoLoop():
 
 def DisplayNextPhoto():
     print("DisplayNextPhoto")
-    getRandomImageFromAlbum(config["albumName"] + " ")
+
+    # available modes: all_media, albums, search, favourites
+    if config["mode"] == "all_media":
+        getRandomImageFromAllLibrary()
+    elif config["mode"] == "albums":
+        getRandomImageFromAlbums(config["albumNames"])
+    elif config["mode"] == "search":
+        print("Unsupported")
+        return
+    elif config["mode"] == "favourites":
+        getRandomImageFromFavourites()
+    else:
+        print(("Unsupported mode:" + config["mode"]))
+        return
+
+
     updateImage('image.jpg')
     root.after(config["photoDisplayTime"], DisplayNextPhoto)
 
@@ -291,12 +372,9 @@ if __name__ == '__main__':
     albums = list_albums()
     # print(albums.__str__())
 
-    getRandomImageFromAlbum(config["albumName"] + " ")
-    show_image()
+    setupTkCanvas()
+    DisplayNextPhoto()
 
-    root.after(config["photoDisplayTime"], DisplayNextPhoto)
     root.mainloop()
-
-    # PhotoLoop()
 
 
