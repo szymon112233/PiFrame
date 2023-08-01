@@ -295,7 +295,6 @@ def getRandomImageFromAllLibrary():
 
     download_media_item((media_items_list[randomPhotoIndex]["baseUrl"] + "=d", "./image.jpg", None))
 
-
 def updateImage(imagePath):
     global root
     print("updateImage")
@@ -320,7 +319,6 @@ def updateImage(imagePath):
     # root.update_idletasks()
     # root.update()
 
-
 def setupTkCanvas():
     print("setupTkCanvas")
     global root, canvas, imgbox
@@ -335,8 +333,6 @@ def setupTkCanvas():
     # show the first image
     # change the image 5 seconds later
     # root.after(5000, updateRoot, 'Dog.jpg')
-
-
 
 def PhotoLoop():
 
@@ -364,7 +360,6 @@ def DisplayNextPhoto():
 
     updateImage('image.jpg')
     root.after(config["photoDisplayTime"], DisplayNextPhoto)
-
 
 if __name__ == '__main__':
     config = load_config()
