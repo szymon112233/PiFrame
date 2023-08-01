@@ -25,12 +25,18 @@ SCOPES = [
 
 service = None
 root = None
+date_label = None
+date_text = None
+current_image_data = None
 
 defaultConfig = config = {
     "mode": "all_media", #available modes: all_media, albums, search, favourites
     "albumNames": [],
     "searchString": "duck",
     "bgColor": "black",
+    "infoTextFont": "Helvetica",
+    "infoTextFontSize": 14,
+    "infoTextColor": "white",
     "photoDisplayTime": 5000
 }
 
@@ -130,7 +136,7 @@ def list_albums():
     return album_list
 
 def getRandomImageFromFavourites():
-    global cached_media
+    global cached_media, current_image_data
     print("getRandomImageFromFavourites")
 
     request_body = {
@@ -168,6 +174,7 @@ def getRandomImageFromFavourites():
             cached_media["favourites"] = favorites_list
 
     randomPhotoIndex = random.randrange(0, len(favorites_list))
+    current_image_data = favorites_list[randomPhotoIndex]
 
     download_media_item((favorites_list[randomPhotoIndex]["baseUrl"] + "=d", "./image.jpg", None))
 
@@ -205,7 +212,7 @@ def load_config():
     return config
 
 def getRandomImageFromAlbums(albumNames):
-    global cached_media
+    global cached_media, current_image_data
     print("getRandomImageFromAlbum")
 
     if (len(albumNames) == 0):
@@ -262,11 +269,12 @@ def getRandomImageFromAlbums(albumNames):
 
 
     randomPhotoIndex = random.randrange(0, len(album_items))
+    current_image_data = album_items[randomPhotoIndex]
 
     download_media_item((album_items[randomPhotoIndex]["baseUrl"] + "=d", "./image.jpg", None))
 
 def getRandomImageFromAllLibrary():
-    global cached_media
+    global cached_media, current_image_data
     print("getRandomImageFromAllLibrary")
 
     media_items_list = []
@@ -292,11 +300,18 @@ def getRandomImageFromAllLibrary():
         cached_media["AllMedia"] = media_items_list
 
     randomPhotoIndex = random.randrange(0, len(media_items_list))
+    current_image_data = media_items_list[randomPhotoIndex]
 
     download_media_item((media_items_list[randomPhotoIndex]["baseUrl"] + "=d", "./image.jpg", None))
 
+def LeftClicked():
+    print("LeftClicked")
+
+def RightClicked():
+    print("RightClicked")
+
 def updateImage(imagePath):
-    global root
+    global root, date_label, current_image_data, date_text
     print("updateImage")
     # resize the image to fill the whole screen
     pilImage = PILIMage.open(imagePath)
@@ -313,6 +328,13 @@ def updateImage(imagePath):
     canvas.itemconfig(imgbox, image=image)
     # need to keep a reference of the image, otherwise it will be garbage collected
     canvas.image = image
+
+    text = current_image_data["mediaMetadata"]["creationTime"]
+    if "contributorInfo" in current_image_data:
+        text += (" by " + current_image_data["contributorInfo"]["displayName"])
+
+    canvas.itemconfig(date_text, text=text)
+
     # label['text'] = imagePath
     # label['image'] = image
     # label.photo = image
@@ -321,13 +343,16 @@ def updateImage(imagePath):
 
 def setupTkCanvas():
     print("setupTkCanvas")
-    global root, canvas, imgbox
+    global root, canvas, imgbox, date_label, date_text
     root = Tk()
     root.attributes('-fullscreen', 1)
     root.bind('<Escape>', lambda _: root.destroy())
     canvas = Canvas(root, highlightthickness=0, bg=config["bgColor"])
     canvas.pack(fill=BOTH, expand=1)
     imgbox = canvas.create_image(root.winfo_screenwidth() / 2, 0, image=None, anchor='n')
+    date_text = canvas.create_text((0, 0), text="test", anchor=NW, fill=config["infoTextColor"], font=(config["infoTextFont"], config["infoTextFontSize"]))
+    # date_label = Label(root, text="233312312312", font=("Helvetica", 14), bg="transparent", fg="white")
+    # date_label.place(x=20, y=10)
     # label = Label(root, compound=TOP)
     # label.pack()
     # show the first image
