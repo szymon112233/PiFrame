@@ -7,6 +7,8 @@ import io
 import pickle
 import random
 import time
+import tkinter
+import win32api
 
 import piexif
 import piexif.helper
@@ -25,9 +27,13 @@ SCOPES = [
 
 service = None
 root = None
+second_window = None
 date_label = None
 date_text = None
 current_image_data = None
+pause = False
+nextPhotoJob = None
+inactivityCheckJob = None
 
 defaultConfig = config = {
     "mode": "all_media", #available modes: all_media, albums, search, favourites
@@ -37,7 +43,9 @@ defaultConfig = config = {
     "infoTextFont": "Helvetica",
     "infoTextFontSize": 14,
     "infoTextColor": "white",
-    "photoDisplayTime": 5000
+    "photoDisplayTime": 5000,
+    "showControlsWindow": True,
+    "inactivityThresholdTime": 60000
 }
 
 cached_albums = None
@@ -60,10 +68,6 @@ def auto_filename(path, instance=0):
         return new_path
     else:
         return auto_filename(path, instance + 1)
-
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press Ctrl+F8 to toggle the breakpoint.
 
 def download_media_item(entry):
     try:
@@ -99,9 +103,7 @@ def download_media_item(entry):
             else:
                 open(path, "wb").write(r.content)
 
-            return (
-                path
-            )
+            return (path)
 
     except Exception as e:
         print(" [ERROR] media item could not be downloaded because:", e)
@@ -190,9 +192,9 @@ def get_token():
     if not credentials or not credentials.valid:
         if credentials and credentials.expired and credentials.refresh_token:
             credentials.refresh(Request())
-
-        flow = InstalledAppFlow.from_client_secrets_file(credentials_file, SCOPES)
-        credentials = flow.run_local_server()
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(credentials_file, SCOPES)
+            credentials = flow.run_local_server()
 
         with open(token_path, "wb") as token:
             pickle.dump(credentials, token)
@@ -202,11 +204,11 @@ def get_token():
 
 def load_config():
     config = None
-    if not (os.path.exists("config.yaml")):
-        with io.open('config.yaml', 'w', encoding='utf8') as outfile:
+    if not (os.path.exists("config/config.yaml")):
+        with io.open('config/config.yaml', 'w', encoding='utf8') as outfile:
             yaml.dump(defaultConfig, outfile, default_flow_style=False, allow_unicode=True)
 
-    with open("config.yaml", 'r') as stream:
+    with open("config/config.yaml", 'r') as stream:
         config = yaml.safe_load(stream)
 
     return config
@@ -304,11 +306,60 @@ def getRandomImageFromAllLibrary():
 
     download_media_item((media_items_list[randomPhotoIndex]["baseUrl"] + "=d", "./image.jpg", None))
 
-def LeftClicked():
-    print("LeftClicked")
 
-def RightClicked():
-    print("RightClicked")
+def Pause():
+    global root, pause, nextPhotoJob, inactivityCheckJob
+    print("Pause")
+    pause = True
+    second_window.withdraw()
+    root.after_cancel(nextPhotoJob)
+    inactivityCheckJob = root.after(1000, CheckIdle)
+
+def UnPause():
+    global pause
+    print("UnPause")
+    pause = False
+    second_window.deiconify()
+    DisplayNextPhoto()
+
+def LeftButtonClicked():
+    print("LeftButtonClicked")
+
+def RightButtonClicked():
+    print("RightButtonClicked")
+
+def PictureButtonClicked():
+    print("PictureButtonClicked")
+    Pause()
+
+
+def ScreenClicked(event):
+    global root
+    x = event.x
+    y = event.y
+    print(f"Mouse clicked at coordinates (x={x}, y={y})")
+
+    sideButtonsRatio = 0.1
+    screenWidth = root.winfo_screenwidth()
+
+    if x < sideButtonsRatio * screenWidth:
+        LeftButtonClicked()
+    elif x < (1 - sideButtonsRatio) * screenWidth:
+        PictureButtonClicked()
+    else:
+        RightButtonClicked()
+
+def get_idle_time() -> float:
+    return (win32api.GetTickCount() - win32api.GetLastInputInfo()) / 1000
+
+def CheckIdle():
+    global root, inactivityCheckJob
+    print("CheckIdle")
+    if get_idle_time() > config["inactivityThresholdTime"]:
+        UnPause()
+        root.after_cancel(inactivityCheckJob)
+    else:
+        inactivityCheckJob = root.after(1000, CheckIdle)
 
 def updateImage(imagePath):
     global root, date_label, current_image_data, date_text
@@ -343,14 +394,39 @@ def updateImage(imagePath):
 
 def setupTkCanvas():
     print("setupTkCanvas")
-    global root, canvas, imgbox, date_label, date_text
+    global root, second_window, canvas, imgbox, date_label, date_text, inactivityCheckJob
     root = Tk()
-    root.attributes('-fullscreen', 1)
+    # root.attributes('-fullscreen', 1)
     root.bind('<Escape>', lambda _: root.destroy())
-    canvas = Canvas(root, highlightthickness=0, bg=config["bgColor"])
+    root.title("PiFrame controls")
+    # inactivityCheckJob = root.after(1000, CheckIdle)
+
+    if config["showControlsWindow"]:
+        root.geometry("200x200")
+        # root.iconify()
+    else:
+        root.overrideredirect(True)
+        root.geometry("0x0")
+
+    button = Button(root, text='Show', command=UnPause)
+    button.pack()
+
+    second_window = Toplevel()
+    second_window.attributes('-fullscreen', 1)
+    second_window.bind('<1>', ScreenClicked)
+    second_window.lift(root)
+    canvas = Canvas(second_window, highlightthickness=0, bg=config["bgColor"])
     canvas.pack(fill=BOTH, expand=1)
     imgbox = canvas.create_image(root.winfo_screenwidth() / 2, 0, image=None, anchor='n')
     date_text = canvas.create_text((0, 0), text="test", anchor=NW, fill=config["infoTextColor"], font=(config["infoTextFont"], config["infoTextFontSize"]))
+
+    # LeftButton = Button(canvas, text='LEFT', command=LeftButtonClicked)
+    # LeftButton.place(anchor=NW, x=0, y=0, relheight=1.0, relwidth=0.1)
+    # LeftButton.lower()
+    # PictureButton = Button(canvas, text='PICTURE', command=PictureButtonClicked)
+    # PictureButton.place(anchor=N, x=root.winfo_screenwidth()/2, y=0, relheight=1.0, relwidth=0.8)
+    # RightButton = Button(canvas, text='RIGHT', command=RightButtonClicked)
+    # RightButton.place(anchor=NE, x=root.winfo_screenwidth(), y=0, relheight=1.0, relwidth=0.1)
     # date_label = Label(root, text="233312312312", font=("Helvetica", 14), bg="transparent", fg="white")
     # date_label.place(x=20, y=10)
     # label = Label(root, compound=TOP)
@@ -366,7 +442,10 @@ def PhotoLoop():
         DisplayNextPhoto()
 
 def DisplayNextPhoto():
+    global nextPhotoJob
     print("DisplayNextPhoto")
+    if pause:
+        return
 
     # available modes: all_media, albums, search, favourites
     if config["mode"] == "all_media":
@@ -384,7 +463,7 @@ def DisplayNextPhoto():
 
 
     updateImage('image.jpg')
-    root.after(config["photoDisplayTime"], DisplayNextPhoto)
+    nextPhotoJob = root.after(config["photoDisplayTime"], DisplayNextPhoto)
 
 if __name__ == '__main__':
     config = load_config()
